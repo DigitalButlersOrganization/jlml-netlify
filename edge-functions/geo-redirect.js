@@ -144,7 +144,7 @@ function rewriteOriginLocation(response, requestUrl) {
         return response;
     }
 
-    const originHosts = new Set(["jlml-wf.indrive.com"]);
+    const originHosts = new Set(["wf.dbutlers.com", "jlml.indrive.com"]);
     if (!originHosts.has(locationUrl.hostname)) {
         return response;
     }
