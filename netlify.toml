@@ -3,6 +3,6 @@
 
 [[redirects]]
   from = "/*"
-  to = "https://art-stas.webflow.io/:splat"
+  to = "https://jlml.indrive.com/:splat"
   status = 200
   force = true
