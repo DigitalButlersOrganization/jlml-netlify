@@ -29,7 +29,8 @@ export default async (request, context) => {
 
     // если уже на локали — ничего не делаем
     if (firstPartLower && supported.has(firstPartLower)) {
-        return context.next();
+        const response = await context.next();
+        return rewriteOriginLocation(response, url);
     }
 
     // не трогаем служебные файлы
@@ -51,7 +52,7 @@ export default async (request, context) => {
                 ? manualLocale
                 : (localeMap[country] || defaultLocale);
 
-    const targetPath = path === "/" ? `/${locale}/` : `/${locale}${path}`;
+    const targetPath = path === "/" ? `/${locale}` : `/${locale}${path}`;
     const targetUrl = new URL(request.url);
     targetUrl.pathname = targetPath;
     targetUrl.searchParams.delete("country");
@@ -85,4 +86,44 @@ function getCookie(cookieHeader, name) {
         }
     }
     return null;
+}
+
+function rewriteOriginLocation(response, requestUrl) {
+    if (!isRedirectStatus(response.status)) {
+        return response;
+    }
+
+    const location = response.headers.get("location");
+    if (!location) {
+        return response;
+    }
+
+    let locationUrl;
+    try {
+        locationUrl = new URL(location, requestUrl.toString());
+    } catch {
+        return response;
+    }
+
+    if (locationUrl.hostname !== "wf.dbutlers.com") {
+        return response;
+    }
+
+    const publicUrl = new URL(requestUrl.toString());
+    publicUrl.pathname = locationUrl.pathname;
+    publicUrl.search = locationUrl.search;
+    publicUrl.hash = locationUrl.hash;
+
+    const headers = new Headers(response.headers);
+    headers.set("Location", publicUrl.toString());
+
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+    });
+}
+
+function isRedirectStatus(status) {
+    return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
