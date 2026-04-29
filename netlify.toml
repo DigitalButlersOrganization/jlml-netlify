@@ -3,6 +3,6 @@
 
 [[redirects]]
   from = "/*"
-  to = "https://wf.dbutlers.com/:splat"
+  to = "https://jlml.indrive.com/:splat"
   status = 200
   force = true

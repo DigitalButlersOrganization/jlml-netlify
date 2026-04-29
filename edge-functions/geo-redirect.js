@@ -27,6 +27,25 @@ export default async (request, context) => {
     const firstPart = pathParts[0];
     const firstPartLower = firstPart ? firstPart.toLowerCase() : "";
 
+    // Default locale is canonical on root: /pe -> / and /pe/x -> /x
+    if (firstPartLower === defaultLocale) {
+        const restPath = pathParts.slice(1).join("/");
+        const canonicalPath = restPath ? `/${restPath}` : "/";
+        const canonicalUrl = new URL(request.url);
+        canonicalUrl.pathname = canonicalPath;
+        canonicalUrl.searchParams.delete("country");
+
+        if (canonicalUrl.pathname !== path || canonicalUrl.search !== url.search) {
+            return new Response(null, {
+                status: 302,
+                headers: {
+                    Location: canonicalUrl.toString(),
+                    "Cache-Control": "private, no-store",
+                },
+            });
+        }
+    }
+
     // если уже на локали — ничего не делаем
     if (firstPartLower && supported.has(firstPartLower)) {
         const response = await context.next();
@@ -51,6 +70,26 @@ export default async (request, context) => {
             : supported.has(manualLocale)
                 ? manualLocale
                 : (localeMap[country] || defaultLocale);
+
+    if (locale === defaultLocale) {
+        if (url.searchParams.has("country")) {
+            const canonicalUrl = new URL(request.url);
+            canonicalUrl.searchParams.delete("country");
+
+            if (canonicalUrl.search !== url.search) {
+                return new Response(null, {
+                    status: 302,
+                    headers: {
+                        Location: canonicalUrl.toString(),
+                        "Cache-Control": "private, no-store",
+                    },
+                });
+            }
+        }
+
+        const response = await context.next();
+        return rewriteOriginLocation(response, url);
+    }
 
     const targetPath = path === "/" ? `/${locale}` : `/${locale}${path}`;
     const targetUrl = new URL(request.url);
@@ -105,7 +144,8 @@ function rewriteOriginLocation(response, requestUrl) {
         return response;
     }
 
-    if (locationUrl.hostname !== "wf.dbutlers.com") {
+    const originHosts = new Set(["wf.dbutlers.com", "jlml.indrive.com"]);
+    if (!originHosts.has(locationUrl.hostname)) {
         return response;
     }
 
