@@ -3,56 +3,12 @@ export default async (request, context) => {
     const method = request.method.toUpperCase();
     const path = url.pathname;
 
-    // Redirect only safe methods to avoid changing POST/PUT semantics.
+    // Redirect only safe methods.
     if (method !== "GET" && method !== "HEAD") {
         return context.next();
     }
 
-    const country = context.geo?.country?.code || "XX";
-
-    const cookie = request.headers.get("cookie") || "";
-    const manualLocale = (getCookie(cookie, "site_locale") || "").toLowerCase();
-    const queryCountry = (url.searchParams.get("country") || "").toLowerCase();
-
-    const localeMap = {
-        PE: "pe",
-        CO: "co",
-        MX: "mx",
-    };
-
-    const supported = new Set(["pe", "co", "mx"]);
-    const defaultLocale = "pe";
-
-    const pathParts = path.split("/").filter(Boolean);
-    const firstPart = pathParts[0];
-    const firstPartLower = firstPart ? firstPart.toLowerCase() : "";
-
-    // Default locale is canonical on root: /pe -> / and /pe/x -> /x
-    if (firstPartLower === defaultLocale) {
-        const restPath = pathParts.slice(1).join("/");
-        const canonicalPath = restPath ? `/${restPath}` : "/";
-        const canonicalUrl = new URL(request.url);
-        canonicalUrl.pathname = canonicalPath;
-        canonicalUrl.searchParams.delete("country");
-
-        if (canonicalUrl.pathname !== path || canonicalUrl.search !== url.search) {
-            return new Response(null, {
-                status: 302,
-                headers: {
-                    Location: canonicalUrl.toString(),
-                    "Cache-Control": "private, no-store",
-                },
-            });
-        }
-    }
-
-    // если уже на локали — ничего не делаем
-    if (firstPartLower && supported.has(firstPartLower)) {
-        const response = await context.next();
-        return rewriteOriginLocation(response, url);
-    }
-
-    // не трогаем служебные файлы
+    // Do not touch service files and internal paths.
     if (
         path.startsWith("/.netlify/") ||
         path.startsWith("/.well-known/") ||
@@ -64,68 +20,32 @@ export default async (request, context) => {
         return context.next();
     }
 
-    const locale =
-        supported.has(queryCountry)
-            ? queryCountry
-            : supported.has(manualLocale)
-                ? manualLocale
-                : (localeMap[country] || defaultLocale);
+    const country = (context.geo?.country?.code || "XX").toUpperCase();
+    const isMx = country === "MX";
 
-    if (locale === defaultLocale) {
-        if (url.searchParams.has("country")) {
-            const canonicalUrl = new URL(request.url);
-            canonicalUrl.searchParams.delete("country");
+    // Only these 4 routes are used:
+    // PE: / and /lessons
+    // MX: /mx and /mx-lessons
+    const routeTargets = {
+        "/": isMx ? "/mx" : "/",
+        "/mx": isMx ? "/mx" : "/",
+        "/lessons": isMx ? "/mx-lessons" : "/lessons",
+        "/mx-lessons": isMx ? "/mx-lessons" : "/lessons",
+    };
 
-            if (canonicalUrl.search !== url.search) {
-                return new Response(null, {
-                    status: 302,
-                    headers: {
-                        Location: canonicalUrl.toString(),
-                        "Cache-Control": "private, no-store",
-                    },
-                });
-            }
-        }
-
+    const targetPath = routeTargets[path];
+    if (!targetPath || targetPath === path) {
         const response = await context.next();
         return rewriteOriginLocation(response, url);
     }
 
-    const targetPath = path === "/" ? `/${locale}` : `/${locale}${path}`;
     const targetUrl = new URL(request.url);
     targetUrl.pathname = targetPath;
-    targetUrl.searchParams.delete("country");
 
-    if (targetUrl.pathname === path) {
-        return context.next();
-    }
-
-    return new Response(null, {
-        status: 302,
-        headers: {
-            Location: targetUrl.toString(),
-            "Cache-Control": "private, no-store",
-        },
-    });
+    return redirect(targetUrl);
 };
 
-export const config = {
-    path: "/*",
-};
-
-function getCookie(cookieHeader, name) {
-    for (const part of cookieHeader.split(";")) {
-        const [k, ...v] = part.trim().split("=");
-        if (k === name) {
-            try {
-                return decodeURIComponent(v.join("="));
-            } catch {
-                return null;
-            }
-        }
-    }
-    return null;
-}
+export const config = { path: "/*" };
 
 function rewriteOriginLocation(response, requestUrl) {
     if (!isRedirectStatus(response.status)) {
@@ -166,4 +86,14 @@ function rewriteOriginLocation(response, requestUrl) {
 
 function isRedirectStatus(status) {
     return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
+
+function redirect(url) {
+    return new Response(null, {
+        status: 302,
+        headers: {
+            Location: url.toString(),
+            "Cache-Control": "private, no-store",
+        },
+    });
 }
