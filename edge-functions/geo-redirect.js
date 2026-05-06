@@ -1,11 +1,26 @@
 export default async (request, context) => {
     const url = new URL(request.url);
+    const canonicalHost = "jlml.indrive.com";
     const method = request.method.toUpperCase();
     const path = url.pathname;
 
     // Redirect only safe methods.
     if (method !== "GET" && method !== "HEAD") {
         return context.next();
+    }
+
+    // Enforce canonical production host.
+    if (
+        url.hostname !== canonicalHost &&
+        url.hostname !== "localhost" &&
+        url.hostname !== "127.0.0.1" &&
+        !url.hostname.endsWith(".netlify.app")
+    ) {
+        const canonicalUrl = new URL(request.url);
+        canonicalUrl.protocol = "https:";
+        canonicalUrl.hostname = canonicalHost;
+        canonicalUrl.port = "";
+        return redirect(canonicalUrl);
     }
 
     // Do not touch service files and internal paths.
@@ -70,6 +85,9 @@ function rewriteOriginLocation(response, requestUrl) {
     }
 
     const publicUrl = new URL(requestUrl.toString());
+    publicUrl.protocol = "https:";
+    publicUrl.hostname = "jlml.indrive.com";
+    publicUrl.port = "";
     publicUrl.pathname = locationUrl.pathname;
     publicUrl.search = locationUrl.search;
     publicUrl.hash = locationUrl.hash;
