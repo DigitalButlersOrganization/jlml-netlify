@@ -35,17 +35,50 @@ export default async (request, context) => {
         return context.next();
     }
 
+    // Manual override from URL (e.g. ?region=mx or ?region=pe).
+    const regionParam = normalizeLocale(url.searchParams.get("region"));
+    if (regionParam) {
+        const canonicalUrl = new URL(request.url);
+        canonicalUrl.searchParams.delete("region");
+
+        const targetPath = mapPathForLocale(path, regionParam);
+        if (targetPath) {
+            canonicalUrl.pathname = targetPath;
+        }
+
+        const response = redirect(canonicalUrl);
+        setLocaleCookie(response, regionParam);
+        return response;
+    }
+
+    // If user explicitly opens locale-specific pages, persist that choice.
+    if (path === "/mx" || path === "/mx-lessons") {
+        const response = await context.next();
+        setLocaleCookie(response, "mx");
+        return rewriteOriginLocation(response, url);
+    }
+
+    // User chose PE pages explicitly.
+    if (path === "/" || path === "/lessons") {
+        const localeCookie = readLocaleCookie(context);
+        if (localeCookie === "pe") {
+            const response = await context.next();
+            return rewriteOriginLocation(response, url);
+        }
+    }
+
+    const forcedLocale = readLocaleCookie(context);
     const country = (context.geo?.country?.code || "XX").toUpperCase();
-    const isMx = country === "MX";
+    const effectiveLocale = forcedLocale || (country === "MX" ? "mx" : "pe");
 
     // Only these 4 routes are used:
     // PE: / and /lessons
     // MX: /mx and /mx-lessons
     const routeTargets = {
-        "/": isMx ? "/mx" : "/",
-        "/mx": isMx ? "/mx" : "/",
-        "/lessons": isMx ? "/mx-lessons" : "/lessons",
-        "/mx-lessons": isMx ? "/mx-lessons" : "/lessons",
+        "/": effectiveLocale === "mx" ? "/mx" : "/",
+        "/mx": effectiveLocale === "mx" ? "/mx" : "/",
+        "/lessons": effectiveLocale === "mx" ? "/mx-lessons" : "/lessons",
+        "/mx-lessons": effectiveLocale === "mx" ? "/mx-lessons" : "/lessons",
     };
 
     const targetPath = routeTargets[path];
@@ -57,7 +90,11 @@ export default async (request, context) => {
     const targetUrl = new URL(request.url);
     targetUrl.pathname = targetPath;
 
-    return redirect(targetUrl);
+    const response = redirect(targetUrl);
+    if (forcedLocale) {
+        setLocaleCookie(response, forcedLocale);
+    }
+    return response;
 };
 
 export const config = { path: "/*" };
@@ -79,7 +116,7 @@ function rewriteOriginLocation(response, requestUrl) {
         return response;
     }
 
-    const originHosts = new Set(["jlml-wf.indrive.com", "jlml.indrive.com", "jlml.dbutlers.com"]);
+    const originHosts = new Set(["jlml-wf.indrive.com", "jlml.indrive.com"]);
     if (!originHosts.has(locationUrl.hostname)) {
         return response;
     }
@@ -114,4 +151,34 @@ function redirect(url) {
             "Cache-Control": "private, no-store",
         },
     });
+}
+
+function normalizeLocale(value) {
+    if (!value) return null;
+    const v = String(value).toLowerCase();
+    if (v === "mx" || v === "pe") return v;
+    return null;
+}
+
+function mapPathForLocale(path, locale) {
+    if (path === "/" || path === "/mx") {
+        return locale === "mx" ? "/mx" : "/";
+    }
+    if (path === "/lessons" || path === "/mx-lessons") {
+        return locale === "mx" ? "/mx-lessons" : "/lessons";
+    }
+    return null;
+}
+
+function readLocaleCookie(context) {
+    const cookie = context.cookies?.get?.("site_locale");
+    const value = typeof cookie === "string" ? cookie : cookie?.value;
+    return normalizeLocale(value);
+}
+
+function setLocaleCookie(response, locale) {
+    response.headers.append(
+        "Set-Cookie",
+        `site_locale=${locale}; Path=/; Max-Age=31536000; SameSite=Lax; Secure`
+    );
 }
